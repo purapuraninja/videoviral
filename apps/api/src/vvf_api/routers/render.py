@@ -15,6 +15,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
+from starlette.background import BackgroundTask
 
 from vvf_api.deps import CurrentAdmin, DbSession
 from vvf_contracts.render import (
@@ -260,7 +261,7 @@ def list_job_outputs(job_id: str, db: DbSession, admin: CurrentAdmin) -> list[Vi
 
 
 @router.get("/render-jobs/{job_id}/preview")
-def preview_job_output(
+async def preview_job_output(
     job_id: str,
     request: Request,
     db: DbSession,
@@ -271,7 +272,8 @@ def preview_job_output(
 
     Resolves which agent holds the artifact, then reverse-proxies the PC's
     read-only preview server (bound to the Tailscale interface). Range requests
-    are forwarded so the dashboard <video> tag can seek.
+    are forwarded so the dashboard <video> tag can seek. Bytes pass straight
+    through — nothing is written to VPS disk.
     """
     job = db.get(RenderJob, job_id)
     if job is None:
@@ -290,32 +292,45 @@ def preview_job_output(
         raise HTTPException(status.HTTP_409_CONFLICT, "holding agent has no preview server registered")
 
     upstream = f"{agent.preview_base_url.rstrip('/')}/{row.local_path.lstrip('/')}"
-    headers = {}
+    fwd_headers = {}
     if rng := request.headers.get("range"):
-        headers["Range"] = rng
+        fwd_headers["Range"] = rng
 
+    # Open the upstream stream now so we can mirror its status/headers, and hand
+    # cleanup to a BackgroundTask so the connection outlives this handler.
+    client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=None), follow_redirects=True)
     try:
-        client = httpx.Client(timeout=None, follow_redirects=True)
-        upstream_resp = client.stream("GET", upstream, headers=headers).__enter__()
+        req = client.build_request("GET", upstream, headers=fwd_headers)
+        upstream_resp = await client.send(req, stream=True)
     except httpx.HTTPError as exc:
+        await client.aclose()
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"preview upstream unreachable: {exc}")
 
-    def _stream():
-        try:
-            yield from upstream_resp.iter_bytes(chunk_size=65536)
-        finally:
-            upstream_resp.close()
-            client.close()
+    if upstream_resp.status_code >= 400:
+        code = upstream_resp.status_code
+        await upstream_resp.aclose()
+        await client.aclose()
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND if code == 404 else status.HTTP_502_BAD_GATEWAY,
+            f"preview upstream returned {code}",
+        )
 
-    resp_headers = {}
-    for h in ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"):
-        if v := upstream_resp.headers.get(h):
-            resp_headers[h] = v
+    async def _cleanup() -> None:
+        await upstream_resp.aclose()
+        await client.aclose()
+
+    resp_headers = {
+        h: v
+        for h in ("Content-Length", "Content-Range", "Accept-Ranges")
+        if (v := upstream_resp.headers.get(h))
+    }
+    resp_headers.setdefault("Accept-Ranges", "bytes")
     return StreamingResponse(
-        _stream(),
+        upstream_resp.aiter_bytes(chunk_size=65536),
         status_code=upstream_resp.status_code,
         headers=resp_headers,
-        media_type="video/mp4",
+        media_type=upstream_resp.headers.get("Content-Type", "video/mp4"),
+        background=BackgroundTask(_cleanup),
     )
 
 
