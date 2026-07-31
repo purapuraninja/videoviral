@@ -49,6 +49,37 @@ class Platform(str, Enum):
     INSTAGRAM_REELS = "instagram_reels"
 
 
+class PublishMode(str, Enum):
+    """How a target is published.
+
+    ``AUTO`` uses the platform's free official API from the render PC.
+    ``MANUAL`` means the admin uploads by hand and records the post URL.
+    """
+
+    AUTO = "auto"
+    MANUAL = "manual"
+
+
+class PublishStatus(str, Enum):
+    """Lifecycle of one publish target (one platform for one render job).
+
+    Normal flow::
+
+        pending -> publishing -> published
+
+    ``manual_required`` means automatic publishing is unavailable (no
+    credentials, unsupported API path, or a non-retryable API rejection) and
+    the admin must upload manually and record the post URL.
+    """
+
+    PENDING = "pending"
+    PUBLISHING = "publishing"
+    PUBLISHED = "published"
+    FAILED = "failed"
+    MANUAL_REQUIRED = "manual_required"
+    SKIPPED = "skipped"
+
+
 class CandidateStatus(str, Enum):
     """Lifecycle of a content candidate."""
 
@@ -74,9 +105,14 @@ class RenderJobStatus(str, Enum):
     Normal flow::
 
         queued -> claimed -> scripting -> assets -> tts -> subtitles
-        -> rendering -> uploading -> completed
+        -> rendering -> uploading -> completed -> publishing -> published
 
-    Failure states: ``failed``, ``cancelled``, ``retry_waiting``.
+    ``completed`` means the render finished and the file is available on the
+    render PC (previewable via Tailscale). ``publishing``/``published`` cover
+    the post-render publishing stage (M6).
+
+    Failure states: ``failed``, ``cancelled``, ``retry_waiting``,
+    ``publish_failed``.
     """
 
     QUEUED = "queued"
@@ -88,9 +124,12 @@ class RenderJobStatus(str, Enum):
     RENDERING = "rendering"
     UPLOADING = "uploading"
     COMPLETED = "completed"
+    PUBLISHING = "publishing"
+    PUBLISHED = "published"
     FAILED = "failed"
     CANCELLED = "cancelled"
     RETRY_WAITING = "retry_waiting"
+    PUBLISH_FAILED = "publish_failed"
 
 
 class RiskFlag(str, Enum):

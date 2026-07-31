@@ -276,12 +276,16 @@ class RenderJob(Base):
     outputs: Mapped[list[VideoOutput]] = relationship(
         back_populates="job", cascade="all, delete-orphan"
     )
+    publish_targets: Mapped[list[PublishTarget]] = relationship(
+        back_populates="job", cascade="all, delete-orphan"
+    )
     claimed_agent: Mapped[Agent | None] = relationship()
 
     __table_args__ = (
         CheckConstraint(
             "status in ('queued','claimed','scripting','assets','tts','subtitles',"
-            "'rendering','uploading','completed','failed','cancelled','retry_waiting')",
+            "'rendering','uploading','completed','publishing','published',"
+            "'failed','cancelled','retry_waiting','publish_failed')",
             name="render_job_status_valid",
         ),
         Index("ix_render_job_status", "status"),
@@ -330,6 +334,52 @@ class VideoOutput(Base):
 
     job: Mapped[RenderJob] = relationship(back_populates="outputs")
     __table_args__ = (Index("ix_video_outputs_job_type", "job_id", "artifact_type"),)
+
+
+class PublishTarget(Base):
+    """One platform's publish state for one render job (M6).
+
+    Publishing runs on the render PC (where the video lives); this table records
+    only the outcome — platform, mode, status, and the resulting post URL. No
+    video bytes and no OAuth credentials are ever stored here.
+    """
+
+    __tablename__ = "publish_targets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: _id("pt"))
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("render_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    mode: Mapped[str] = mapped_column(String(16), default="auto")
+    status: Mapped[str] = mapped_column(String(24), default="pending")
+    post_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    platform_post_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempt: Mapped[int] = mapped_column(Integer, default=0)
+    # Publishing metadata the agent uses (title/description/hashtags/private).
+    request_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=dict)
+    claimed_by_agent_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    job: Mapped[RenderJob] = relationship(back_populates="publish_targets")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('pending','publishing','published','failed',"
+            "'manual_required','skipped')",
+            name="publish_target_status_valid",
+        ),
+        CheckConstraint("mode in ('auto','manual')", name="publish_target_mode_valid"),
+        UniqueConstraint("job_id", "platform", name="uq_publish_target_job_platform"),
+        Index("ix_publish_targets_status", "status"),
+    )
 
 
 class Agent(Base):

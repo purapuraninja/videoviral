@@ -14,6 +14,7 @@ for rel in [
     "packages/shared/src",
     "integrations/wigolo/src",
     "integrations/money-printer-turbo/src",
+    "publishers/src",
     "apps/api/src",
     "apps/discovery-worker/src",
     "apps/local-render-agent/src",

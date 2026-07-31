@@ -22,6 +22,12 @@ from vvf_contracts.agent import (
     JobArtifact,
 )
 from vvf_contracts.common import RenderJobStatus
+from vvf_contracts.publish import (
+    AgentPublishResultIn,
+    ClaimPublishIn,
+    ClaimPublishOut,
+    PublishResultItem,
+)
 from vvf_local_agent.config import AgentConfig
 
 
@@ -115,3 +121,28 @@ class VpsClient:
             json=body.model_dump(mode="json"),
             headers=self._headers(),
         )
+
+    # --- publishing (M6) ------------------------------------------------
+    def claim_publish(self) -> ClaimPublishOut | None:
+        """Claim pending publish targets for a job whose video this PC holds."""
+        body = ClaimPublishIn(agent_id=self._agent_id or "")
+        resp = self._http.post(
+            f"{self._config.vps_api_url}/api/v1/agents/claim-publish",
+            json=body.model_dump(),
+            headers=self._headers(),
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return ClaimPublishOut(**resp.json())
+
+    def report_publish(self, job_id: str, results: list[PublishResultItem]) -> None:
+        """Report per-platform publish outcomes (never includes credentials)."""
+        body = AgentPublishResultIn(agent_id=self._agent_id or "", results=results)
+        resp = self._http.post(
+            f"{self._config.vps_api_url}/api/v1/agents/jobs/{job_id}/publish-result",
+            json=body.model_dump(mode="json"),
+            headers=self._headers(),
+            timeout=120.0,
+        )
+        resp.raise_for_status()

@@ -100,3 +100,48 @@ export async function cancelJob(id: string) {
   return postJson(`/render-jobs/${id}/cancel`, {});
 }
 
+// --- publishing (M6) -------------------------------------------------------
+
+export type PublishTarget = {
+  id: string;
+  job_id: string;
+  platform: string;
+  mode: string;
+  status: string;
+  post_url?: string | null;
+  platform_post_id?: string | null;
+  error_message?: string | null;
+  attempt: number;
+  published_at?: string | null;
+};
+
+export async function getPublishTargets(id: string): Promise<PublishTarget[]> {
+  const res = await fetch(`${API}/render-jobs/${id}/publish-targets`, {
+    credentials: "include",
+  });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function requestPublish(
+  id: string,
+  body: {
+    platforms: string[];
+    mode?: string;
+    title?: string;
+    description?: string;
+    hashtags?: string[];
+    private?: boolean;
+  }
+) {
+  return postJson(`/render-jobs/${id}/publish`, body);
+}
+
+export async function recordManualPublish(targetId: string, postUrl: string) {
+  return postJson(`/publish-targets/${targetId}/manual`, { post_url: postUrl });
+}
+
+export async function retryPublishTarget(targetId: string) {
+  return postJson(`/publish-targets/${targetId}/retry`, {});
+}
+

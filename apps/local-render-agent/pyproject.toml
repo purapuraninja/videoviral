@@ -1,13 +1,14 @@
 [project]
 name = "vvf-local-agent"
 version = "0.1.0"
-description = "VVF local render agent: claims jobs and drives MoneyPrinterTurbo"
+description = "VVF local render agent: claims jobs, drives MoneyPrinterTurbo, serves Tailscale preview, publishes to platforms"
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
     "vvf-contracts",
     "vvf-shared",
     "vvf-mpt",
+    "vvf-publishers",
 ]
 
 [build-system]

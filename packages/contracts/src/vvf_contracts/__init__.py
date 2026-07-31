@@ -9,6 +9,8 @@ from vvf_contracts.common import (
     AspectRatio,
     LanguageCode,
     Platform,
+    PublishMode,
+    PublishStatus,
     RiskFlag,
     TimestampMixin,
 )
@@ -45,6 +47,16 @@ from vvf_contracts.agent import (
     ClaimJobIn,
     ClaimJobOut,
 )
+from vvf_contracts.publish import (
+    AgentPublishResultIn,
+    ClaimPublishIn,
+    ClaimPublishOut,
+    ManualPublishIn,
+    PublishJobPayload,
+    PublishRequest,
+    PublishResultItem,
+    PublishTargetOut,
+)
 from vvf_contracts.mpt import MPTVideoParams
 
 __all__ = [
@@ -52,6 +64,8 @@ __all__ = [
     "AspectRatio",
     "LanguageCode",
     "Platform",
+    "PublishMode",
+    "PublishStatus",
     "RiskFlag",
     "TimestampMixin",
     # research
@@ -84,6 +98,15 @@ __all__ = [
     "AgentRegisterOut",
     "ClaimJobIn",
     "ClaimJobOut",
+    # publish (M6)
+    "AgentPublishResultIn",
+    "ClaimPublishIn",
+    "ClaimPublishOut",
+    "ManualPublishIn",
+    "PublishJobPayload",
+    "PublishRequest",
+    "PublishResultItem",
+    "PublishTargetOut",
     # mpt
     "MPTVideoParams",
 ]

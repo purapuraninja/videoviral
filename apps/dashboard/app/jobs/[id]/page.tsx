@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getJob, getJobEvents, getJobOutputs, cancelJob } from "@/lib/api";
+import {
+  PublishTarget,
+  cancelJob,
+  getJob,
+  getJobEvents,
+  getJobOutputs,
+  getPublishTargets,
+} from "@/lib/api";
+import PublishPanel from "@/components/PublishPanel";
 
 type Job = {
   id: string;
@@ -27,12 +35,14 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   const [job, setJob] = useState<Job | null>(null);
   const [events, setEvents] = useState<Ev[]>([]);
   const [outputs, setOutputs] = useState<Out[]>([]);
+  const [targets, setTargets] = useState<PublishTarget[]>([]);
 
   async function refresh() {
     const j = await getJob(params.id);
     if (j) setJob(j);
     setEvents(await getJobEvents(params.id));
     setOutputs(await getJobOutputs(params.id));
+    setTargets(await getPublishTargets(params.id));
   }
   useEffect(() => {
     refresh();
@@ -45,7 +55,14 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   const last = events[events.length - 1];
   const progress = last?.progress ?? 0;
   const title = job.payload_json?.candidate?.title || job.candidate_id;
-  const terminal = ["completed", "failed", "cancelled"].includes(job.status);
+  const terminal = [
+    "completed",
+    "failed",
+    "cancelled",
+    "publishing",
+    "published",
+    "publish_failed",
+  ].includes(job.status);
 
   async function onCancel() {
     await cancelJob(params.id);
@@ -152,6 +169,13 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           {outputs.length === 0 && <li className="text-slate-500">No artifacts yet.</li>}
         </ul>
       </div>
+
+      <PublishPanel
+        jobId={params.id}
+        jobStatus={job.status}
+        targets={targets}
+        onChange={refresh}
+      />
     </div>
   );
 }

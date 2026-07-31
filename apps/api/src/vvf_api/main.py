@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from vvf_api.auth import router as auth_router
-from vvf_api.routers import agents, health, render, research
+from vvf_api.routers import agents, health, publish, render, research
 from vvf_shared.config import get_settings
 from vvf_shared.logging import configure_logging, get_logger
 
@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(research.router, prefix="/api/v1")
     app.include_router(render.router, prefix="/api/v1")
+    app.include_router(publish.router, prefix="/api/v1")
     app.include_router(agents.router, prefix="/api/v1")
     return app
 

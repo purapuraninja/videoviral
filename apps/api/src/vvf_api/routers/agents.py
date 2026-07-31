@@ -7,10 +7,13 @@ it claim + drive a render job.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Header, HTTPException, status
 from sqlalchemy import select
 
 from vvf_api.deps import DbSession
+from vvf_api.routers.publish import _sync_job_status
 from vvf_contracts.agent import (
     AgentHeartbeatIn,
     AgentJobCompleteIn,
@@ -21,11 +24,27 @@ from vvf_contracts.agent import (
     ClaimJobIn,
     ClaimJobOut,
 )
+from vvf_contracts.publish import (
+    AgentPublishResultIn,
+    ClaimPublishIn,
+    ClaimPublishOut,
+    PublishJobPayload,
+)
 from vvf_contracts.render import RenderJobPayload
-from vvf_database.models import Agent, RenderJob, RenderJobEvent, VideoOutput
+from vvf_database.models import (
+    Agent,
+    PublishTarget,
+    RenderJob,
+    RenderJobEvent,
+    VideoOutput,
+)
 from vvf_shared.security import TokenManager, hash_token
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _token_manager() -> TokenManager:
@@ -242,5 +261,129 @@ def fail_job(
     )
     db.commit()
     return {"ok": True, "job_id": job.id, "status": new_status}
+
+
+# ---------------------------------------------------------------------------
+# Publishing (M6) — the agent publishes from the PC and reports the outcome.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/claim-publish", response_model=ClaimPublishOut)
+def claim_publish(
+    body: ClaimPublishIn,
+    db: DbSession,
+    authorization: str | None = Header(default=None),
+) -> ClaimPublishOut:
+    """Claim all pending publish targets for the oldest job awaiting publishing.
+
+    Targets are grouped per job so the agent uploads one file to several
+    platforms in a single pass.
+    """
+    agent = get_agent(db, authorization)
+    pending = db.execute(
+        select(PublishTarget)
+        .where(PublishTarget.status == "pending")
+        .order_by(PublishTarget.created_at)
+        .with_for_update(skip_locked=True)
+    ).scalars().all()
+    if not pending:
+        return ClaimPublishOut(claimed=False)
+
+    job_id = pending[0].job_id
+    mine = [t for t in pending if t.job_id == job_id]
+
+    # The artifact must be held by *this* agent — only it can read the file.
+    artifact = db.execute(
+        select(VideoOutput)
+        .where(
+            VideoOutput.job_id == job_id,
+            VideoOutput.artifact_type.in_(("mp4", "mp4_combined")),
+            VideoOutput.agent_id == agent.id,
+        )
+        .order_by(VideoOutput.created_at.desc())
+    ).scalars().first()
+    if artifact is None or not artifact.local_path:
+        return ClaimPublishOut(claimed=False)
+
+    meta = mine[0].request_json or {}
+    for target in mine:
+        target.status = "publishing"
+        target.claimed_by_agent_id = agent.id
+        target.attempt += 1
+    db.add(
+        RenderJobEvent(
+            job_id=job_id,
+            agent_id=agent.id,
+            status="publishing",
+            message="publishing to " + ", ".join(t.platform for t in mine),
+            progress=100,
+        )
+    )
+    db.commit()
+
+    return ClaimPublishOut(
+        claimed=True,
+        payload=PublishJobPayload(
+            job_id=job_id,
+            target_ids=[t.id for t in mine],
+            platforms=[t.platform for t in mine],
+            mode=mine[0].mode,
+            local_path=artifact.local_path,
+            title=meta.get("title") or "Video",
+            description=meta.get("description") or "",
+            hashtags=meta.get("hashtags") or [],
+            private=bool(meta.get("private")),
+        ),
+    )
+
+
+@router.post("/jobs/{job_id}/publish-result")
+def report_publish_result(
+    job_id: str,
+    body: AgentPublishResultIn,
+    db: DbSession,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Record per-platform publish outcomes reported by the agent."""
+    agent = get_agent(db, authorization)
+    job = db.get(RenderJob, job_id) or _fail404("render job")
+
+    targets = {
+        t.platform: t
+        for t in db.execute(
+            select(PublishTarget).where(PublishTarget.job_id == job_id)
+        ).scalars().all()
+    }
+    applied = 0
+    for item in body.results:
+        target = targets.get(item.platform.value)
+        if target is None:
+            continue
+        if target.claimed_by_agent_id not in (None, agent.id):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, f"{item.platform.value} target claimed by another agent"
+            )
+        target.status = item.status.value
+        target.post_url = item.post_url
+        target.platform_post_id = item.platform_post_id
+        target.error_message = item.error_message
+        if item.status.value == "published":
+            target.published_at = _utcnow()
+        db.add(
+            RenderJobEvent(
+                job_id=job_id,
+                agent_id=agent.id,
+                status="published" if item.status.value == "published" else "publishing",
+                message=f"{item.platform.value}: {item.status.value}"
+                + (f" -> {item.post_url}" if item.post_url else "")
+                + (f" ({item.error_message})" if item.error_message else ""),
+                progress=100,
+            )
+        )
+        applied += 1
+
+    _sync_job_status(db, job_id)
+    db.commit()
+    return {"ok": True, "job_id": job.id, "applied": applied, "status": job.status}
 
 

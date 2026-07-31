@@ -14,6 +14,7 @@ import time
 from vvf_local_agent.api_client import VpsClient
 from vvf_local_agent.config import AgentConfig
 from vvf_local_agent.preview import start_preview_server
+from vvf_local_agent.publish_runner import PublishRunner
 from vvf_local_agent.runner import RenderRunner
 from vvf_mpt import MPTClient, MockMPTClient
 from vvf_shared.logging import configure_logging, get_logger
@@ -52,6 +53,7 @@ def main() -> int:
 
     mpt = _make_mpt(config)
     runner = RenderRunner(mpt, config.mpt_base_url)
+    publisher = PublishRunner(config.preview_root)
 
     # Read-only preview server for dashboard playback over Tailscale. Bind to the
     # Tailscale interface (VVF_PREVIEW_HOST); loopback-only means "no preview".
@@ -66,21 +68,44 @@ def main() -> int:
     hb = threading.Thread(target=_heartbeat_loop, args=(config, vps, stop), daemon=True)
     hb.start()
 
-    log.info("local render agent ready, polling for jobs")
+    log.info("local render agent ready, polling for render + publish work")
     try:
         while not stop.is_set():
             claimed = vps.claim_job()
-            if claimed is None or not claimed.claimed or claimed.payload is None:
-                time.sleep(config.poll_interval)
+            if claimed is not None and claimed.claimed and claimed.payload is not None:
+                log.info(f"claimed job {claimed.job_id} attempt {claimed.attempt}")
+                runner.run(vps, claimed.job_id, claimed.payload, claimed.payload.idempotency_key)
                 continue
-            log.info(f"claimed job {claimed.job_id} attempt {claimed.attempt}")
-            runner.run(vps, claimed.job_id, claimed.payload, claimed.payload.idempotency_key)
+
+            # No render work — check whether anything needs publishing.
+            if _try_publish(vps, publisher, log):
+                continue
+
+            time.sleep(config.poll_interval)
     except KeyboardInterrupt:  # pragma: no cover
         log.info("shutdown requested")
         stop.set()
     finally:
         stop.set()
+        if preview is not None:
+            preview.shutdown()
     return 0
+
+
+def _try_publish(vps: VpsClient, publisher: PublishRunner, log) -> bool:
+    """Claim + run one publish batch. Returns True when work was done."""
+    try:
+        claimed = vps.claim_publish()
+    except Exception as exc:  # pragma: no cover - network path
+        log.warning(f"claim-publish failed: {exc}")
+        return False
+    if claimed is None or not claimed.claimed or claimed.payload is None:
+        return False
+    try:
+        publisher.run(vps, claimed.payload)
+    except Exception as exc:  # pragma: no cover - publisher bug guard
+        log.exception(f"publish run failed for {claimed.payload.job_id}: {exc}")
+    return True
 
 
 if __name__ == "__main__":
