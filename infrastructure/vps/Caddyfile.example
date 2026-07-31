@@ -1,0 +1,10 @@
+# Caddy reverse proxy example for the VPS.
+# Terminates TLS for the API (api) and the dashboard (dash).
+
+api.your-vps.example {
+    reverse_proxy api:8000
+}
+
+dash.your-vps.example {
+    reverse_proxy dashboard:3000
+}

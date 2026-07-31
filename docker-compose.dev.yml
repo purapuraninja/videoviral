@@ -1,0 +1,111 @@
+# Viral Video Factory — development stack
+# Spins up PostgreSQL, Redis, wigolo, the FastAPI API, and the Next.js dashboard.
+# The local-render-agent is NOT included here; it runs on a separate local PC.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vvf}
+      POSTGRES_USER: ${POSTGRES_USER:-vvf}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vvf_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vvf} -d ${POSTGRES_DB:-vvf}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./packages:/app/packages
+      - ./integrations:/app/integrations
+      - ./apps/api/src:/app/apps/api/src
+
+  dashboard:
+    build:
+      context: ./apps/dashboard
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/dashboard:/app
+      - /app/node_modules
+    depends_on:
+      - api
+
+  # wigolo runs as a local protected service (MCP HTTP transport / REST bridge).
+  # Opt-in via the "wigolo" profile so `up` doesn't pull the ~1.5GB image by default.
+  wigolo:
+    image: ghcr.io/knockoutez/wigolo:latest
+    restart: unless-stopped
+    profiles: ["wigolo"]
+    environment:
+      WIGOLO_TRANSPORT: http
+      WIGOLO_PORT: 3000
+    ports:
+      - "3001:3000"
+    volumes:
+      - wigolo_data:/root/.wigolo
+
+  discovery-worker:
+    build:
+      context: .
+      dockerfile: apps/discovery-worker/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      WIGOLO_BASE_URL: http://wigolo:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./packages:/app/packages
+      - ./integrations:/app/integrations
+      - ./apps/discovery-worker/src:/app/apps/discovery-worker/src
+
+volumes:
+  postgres_data:
+  redis_data:
+  wigolo_data:
+

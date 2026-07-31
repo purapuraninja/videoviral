@@ -1,0 +1,25 @@
+[project]
+name = "vvf-discovery-worker"
+version = "0.1.0"
+description = "VVF discovery worker: wigolo retrieval, normalization, scoring"
+requires-python = ">=3.11"
+dependencies = [
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
+    "redis>=5.0",
+    "httpx>=0.27",
+    "vvf-contracts",
+    "vvf-database",
+    "vvf-shared",
+    "vvf-wigolo",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+vvf-discovery-worker = "vvf_discovery_worker.main:main"

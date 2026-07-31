@@ -1,0 +1,12 @@
+Write a vertical 9:16 short-video script in {language} about: {subject}.
+
+Constraints:
+- Duration ~{duration} seconds (~{words} words).
+- Open with a 1-2 second hook line that creates urgency.
+- Tone: {tone}.
+- Use only facts from the provided sources; do not invent statistics.
+- End with a short call-to-action.
+- Output the spoken narration only, no stage directions.
+
+Facts:
+{facts}

@@ -1,0 +1,19 @@
+[project]
+name = "vvf-contracts"
+version = "0.1.0"
+description = "Pydantic contracts shared across VVF services + generated TypeScript client"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+dev = ["datamodel-code-generator>=0.25"]

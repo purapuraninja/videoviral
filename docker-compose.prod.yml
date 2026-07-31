@@ -1,0 +1,93 @@
+# Viral Video Factory — production stack for the VPS.
+# - API + dashboard bound to 127.0.0.1 (nginx reverse-proxies the public domains)
+# - Data services not published publicly
+# - wigolo opt-in via the "wigolo" profile; discovery uses mock by default
+# Usage: docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - /opt/viral-video-factory/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - /opt/viral-video-factory/data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      VVF_PUBLIC_API_URL: ${VVF_PUBLIC_API_URL:-https://api.purapuraninja.my.id}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile.prod
+      args:
+        NEXT_PUBLIC_API_URL: http://api:8000
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: http://api:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api
+
+  wigolo:
+    image: ghcr.io/knockoutez/wigolo:latest
+    restart: unless-stopped
+    profiles: ["wigolo"]
+    environment:
+      WIGOLO_TRANSPORT: http
+      WIGOLO_PORT: 3000
+    volumes:
+      - /opt/viral-video-factory/data/wigolo:/root/.wigolo
+
+  discovery-worker:
+    build:
+      context: .
+      dockerfile: apps/discovery-worker/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      WIGOLO_BASE_URL: http://wigolo:3000
+      VVF_WIGOLO_USE_MOCK: ${VVF_WIGOLO_USE_MOCK:-1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy

@@ -1,0 +1,30 @@
+[project]
+name = "vvf-api"
+version = "0.1.0"
+description = "Viral Video Factory FastAPI: auth, orchestration, agent protocol"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
+    "passlib[bcrypt]>=1.7",
+    "itsdangerous>=2.1",
+    "httpx>=0.27",
+    "redis>=5.0",
+    "vvf-contracts",
+    "vvf-database",
+    "vvf-shared",
+    "vvf-wigolo",
+    "vvf-mpt",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+vvf-api = "vvf_api.main:main"
