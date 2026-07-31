@@ -64,11 +64,13 @@ viral-video-factory/
 ├── integrations/
 │   ├── wigolo/                    # wigolo REST client and result mapper
 │   └── money-printer-turbo/       # MPT API/CLI adapter and output parser
-├── publishers/
-│   ├── youtube/                   # YouTube Data API v3 uploader (free, OAuth)
-│   ├── tiktok/                    # TikTok Content Posting API uploader (free, OAuth)
-│   ├── instagram/                 # Instagram Graph API uploader (free, OAuth)
-│   └── manual/                    # Manual fallback: local download + checklist
+├── publishers/                    # runs on the render PC (installed with the agent)
+│   └── src/vvf_publishers/
+│       ├── base.py                # Publisher protocol, outcomes, credential helpers
+│       ├── youtube.py             # YouTube Data API v3 (resumable upload)
+│       ├── tiktok.py              # TikTok Content Posting API (Direct Post FILE_UPLOAD)
+│       ├── instagram.py           # Instagram Graph API (rupload.facebook.com)
+│       └── __init__.py            # registry + ManualPublisher fallback + publish_all
 ├── infrastructure/
 │   ├── vps/                       # Docker Compose, reverse proxy, environment samples
 │   └── local-pc/                  # MPT + local agent installation/configuration
@@ -77,6 +79,8 @@ viral-video-factory/
 │   ├── api-contract.md
 │   ├── deployment-vps.md
 │   ├── deployment-local-pc.md
+│   ├── deployment-tailscale-preview.md
+│   ├── publishing-setup.md
 │   └── content-policy.md
 ├── tests/
 │   ├── unit/
@@ -204,9 +208,11 @@ publish_targets
 
 **publish_targets** (one row per platform per job)
 
-- `id`, `job_id`, `platform` (`youtube | tiktok | instagram | other`)
+- `id`, `job_id`, `platform` (`youtube_shorts | tiktok | instagram_reels`)
 - `mode` (`auto | manual`), `status` (`pending | publishing | published | failed | manual_required | skipped`)
-- `post_url`, `platform_post_id`, `error_message`, `attempt`, timestamps
+- `post_url`, `platform_post_id`, `error_message`, `attempt`
+- `request_json` (title/description/hashtags/private), `claimed_by_agent_id`, `published_at`, timestamps
+- Unique per `(job_id, platform)` so re-requesting a publish updates the existing target instead of duplicating it.
 
 Status flow:
 
@@ -216,6 +222,8 @@ queued -> claimed -> scripting -> assets -> tts -> subtitles -> rendering
 ```
 
 `completed` means the render finished and the file is available on the PC (previewable via Tailscale). `publishing`/`published` cover the post-render publishing stage. Failure states: `failed`, `cancelled`, `retry_waiting`, `publish_failed`.
+
+A job stays `publishing` while any target is `pending`, `publishing`, or `manual_required` — `manual_required` is a request for admin action, not a terminal failure. It becomes `published` once at least one platform is live and nothing is outstanding, and `publish_failed` only when every target failed terminally.
 
 ## 8. Candidate Discovery Rules
 
@@ -395,13 +403,21 @@ Use idempotency keys so a network retry cannot create duplicate rendered videos.
 - Add job retries, dead-letter handling, notifications, usage/cost metrics, and operational dashboards.
 - Add multiple local PCs as rendering agents if needed (preview routes must resolve to the PC that holds each file).
 
-### Milestone 6 — Publishing
+### Milestone 6 — Publishing ✅ implemented
 
-- Add `publish_targets` model + migration and the `publishing`/`published`/`publish_failed` statuses.
-- Implement free official-API publishers on the agent: **YouTube Data API v3**, **TikTok Content Posting API**, **Instagram Graph API** (one-time OAuth app setup; refresh tokens stored in PC/server env only).
-- Implement the **manual fallback**: mark target `manual_required`, let the admin download from the Tailscale preview and record the post URL.
-- Add publish endpoints (`POST /render-jobs/{id}/publish`, `POST /agents/jobs/{id}/publish-result`) and a dashboard publish panel showing per-platform status + post links.
-- Publishing runs only after admin go-ahead; every posted video keeps its provenance manifest with the resulting post URLs.
+- ✅ `publish_targets` model + migration `0003_publishing`, and the `publishing`/`published`/`publish_failed` render-job statuses.
+- ✅ Free official-API publishers in `publishers/` (run on the PC): **YouTube Data API v3** (resumable upload), **TikTok Content Posting API** (Direct Post `FILE_UPLOAD`, with the mandatory `creator_info` pre-flight and privacy negotiation), **Instagram Graph API** (`rupload.facebook.com` for local bytes). Credentials read from the PC environment only.
+- ✅ **Manual fallback**: any platform without credentials — or one whose API withholds a public post id — is marked `manual_required`; the admin downloads from the Tailscale preview and records the post URL.
+- ✅ Publish endpoints (`POST /render-jobs/{id}/publish`, `GET /render-jobs/{id}/publish-targets`, `POST /publish-targets/{id}/manual`, `POST /publish-targets/{id}/retry`, `POST /agents/claim-publish`, `POST /agents/jobs/{id}/publish-result`) and a dashboard publish panel with per-platform status, post links, manual URL entry, and retry.
+- ✅ Publishing runs only after admin go-ahead; every posted video keeps its provenance with the resulting post URLs.
+- ✅ AI-generated disclosure set where supported (YouTube `containsSyntheticMedia`, TikTok `is_aigc`).
+
+Known platform constraints (not defects):
+
+- Unaudited YouTube API projects force every upload to `private`.
+- Unaudited TikTok apps force `SELF_ONLY` and return no public post id, so we fall back to `manual_required`.
+- Instagram accepts local bytes **only** via Facebook Login for Business; apps on Instagram Login require a public URL and therefore fall back to manual.
+- TikTok access tokens expire (~24 h); refresh-token rotation is still outstanding.
 
 ## 14. Definition of Done for MVP
 

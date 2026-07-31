@@ -45,7 +45,7 @@ Publish: agent -> YouTube / TikTok / Instagram (free official APIs)
 | `apps/discovery-worker` | Redis consumer: wigolo retrieval + scoring |
 | `apps/local-render-agent` | Local PC service: claim -> MPT -> local file -> Tailscale preview -> publish |
 | `apps/dashboard` | Next.js admin UI |
-| `publishers/*` | (M6) YouTube/TikTok/Instagram official-API uploaders + manual fallback |
+| `publishers/*` | YouTube/TikTok/Instagram official-API uploaders + manual fallback (run on the PC) |
 
 ## Data flow (happy path)
 
@@ -60,14 +60,17 @@ Publish: agent -> YouTube / TikTok / Instagram (free official APIs)
    duration, provenance) — **the video file stays on the PC**.
 7. Admin previews the video in the dashboard (VPS proxies a live stream from the
    PC over Tailscale; nothing is stored on the VPS).
-8. Agent publishes the video to the target platforms (free official APIs, with a
-   manual fallback) and reports post URLs back to the VPS.
+8. Admin queues publish targets; the agent claims them, publishes from the PC via
+   the platforms' free official APIs (or reports `manual_required`), and post URLs
+   are recorded against the job.
 
 ## Security model
 
 - Single-admin credentials + signed session cookies (MVP).
 - Per-agent tokens issued at registration, stored only as SHA-256 fingerprints.
 - LLM/TTS keys and publishing OAuth/refresh tokens live only in server/local encrypted env config.
+- Publishing credentials never leave the render PC: they are not sent to the VPS, not stored in the database, and not included in publish outcomes.
 - The PC preview server binds to the **Tailscale interface only** (never public); the VPS proxies but never stores the stream.
 - Blocked-domain list + content risk flags; admin approval mandatory.
 - Provenance manifest recorded for every output, including published post URLs per platform.
+- AI-generated disclosure is set where the platform supports it (YouTube `containsSyntheticMedia`, TikTok `is_aigc`).

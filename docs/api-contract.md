@@ -38,7 +38,9 @@ Admin endpoints expect `Authorization: Bearer <session_token>`.
 | GET  | `/api/v1/render-jobs/{id}/outputs` | List output metadata (no files stored on VPS) |
 | GET  | `/api/v1/render-jobs/{id}/preview` | Stream the video proxied from the PC over Tailscale (Range-supported; nothing stored) |
 | GET  | `/api/v1/render-jobs/{id}/publish-targets` | List per-platform publish status + post URLs |
-| POST | `/api/v1/render-jobs/{id}/publish` | Trigger publishing to selected platforms |
+| POST | `/api/v1/render-jobs/{id}/publish` | Queue publish targets (platforms, mode, hashtags) |
+| POST | `/api/v1/publish-targets/{id}/manual` | Record a hand-uploaded post URL (manual fallback) |
+| POST | `/api/v1/publish-targets/{id}/retry` | Re-queue a failed/manual target |
 
 ## Local render agent protocol
 
@@ -52,9 +54,24 @@ Agents authenticate with `Authorization: Bearer <agent_token>`.
 | POST | `/api/v1/agents/jobs/{id}/events` | Post a stage event |
 | POST | `/api/v1/agents/jobs/{id}/complete` | Complete by reporting metadata + local path (**no file upload**) |
 | POST | `/api/v1/agents/jobs/{id}/fail` | Fail (optionally retryable) |
+| POST | `/api/v1/agents/claim-publish` | Claim pending publish targets for a job whose video this PC holds |
 | POST | `/api/v1/agents/jobs/{id}/publish-result` | Report platform + post URL (or `manual_required`) |
 
 > Note: there is **no** artifact-upload endpoint. Rendered video never leaves the PC; the VPS stores metadata only and previews the file by proxying a Tailscale stream.
+>
+> Publishing also runs on the PC. `claim-publish` returns the local file path plus title/description/hashtags; the agent uploads to the platforms and reports outcomes. Platform credentials stay on the PC and are never sent to the VPS.
+
+### Publish target lifecycle
+
+```text
+pending -> publishing -> published
+                     \-> failed            (retryable from the dashboard)
+                     \-> manual_required   (admin uploads by hand, records URL)
+```
+
+Render job publish statuses: `publishing`, `published`, `publish_failed`. A job
+stays `publishing` while any target is `pending`, `publishing`, or
+`manual_required`.
 
 ## Render job payload
 
