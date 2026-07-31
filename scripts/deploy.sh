@@ -12,6 +12,10 @@ mkdir -p "$DATA_DIR"/{postgres,redis,wigolo}
 
 gen() { openssl rand -hex 24; }
 
+# wigolo's bearer token must be identical for the daemon and the worker, so
+# generate it once and reuse it for both variables.
+WIGOLO_TOKEN="$(openssl rand -hex 32)"
+
 if [ ! -f .env ]; then
   echo "[deploy] generating .env with strong random secrets ..."
   cat > .env <<EOF
@@ -33,11 +37,15 @@ API_HOST=0.0.0.0
 API_PORT=8000
 VVF_CORS_ORIGINS=https://app.purapuraninja.my.id,https://api.purapuraninja.my.id
 NEXT_PUBLIC_API_URL=http://api:8000
-WIGOLO_BASE_URL=http://wigolo:3000
-WIGOLO_API_TOKEN=
+VVF_WIGOLO_USE_MOCK=1
+VVF_WIGOLO_BASE_URL=http://wigolo:3333
+WIGOLO_API_TOKEN=$WIGOLO_TOKEN
+VVF_WIGOLO_API_TOKEN=$WIGOLO_TOKEN
+VVF_WIGOLO_CATEGORY=news
+VVF_WIGOLO_TIME_RANGE=week
+VVF_WIGOLO_SEARCH_DEPTH=balanced
 MPT_BASE_URL=http://127.0.0.1:8080
 MPT_API_TOKEN=
-VVF_WIGOLO_USE_MOCK=1
 EOF
   chmod 600 .env
   echo "[deploy] .env created (chmod 600). Admin password:"

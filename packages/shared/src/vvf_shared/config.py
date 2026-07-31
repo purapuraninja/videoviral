@@ -64,19 +64,16 @@ class Settings(BaseSettings):
     public_api_url: str = "http://localhost:8000"
 
     # Integrations
-    wigolo_base_url: str = "http://wigolo:3000"
+    # wigolo `serve` REST API (POST /v1/{tool}); token required off loopback.
+    wigolo_base_url: str = "http://wigolo:3333"
     wigolo_api_token: str = ""
+    wigolo_use_mock: bool = True
+    # Discovery search tuning (see integrations/wigolo).
+    wigolo_category: str = "news"
+    wigolo_time_range: str = "week"
+    wigolo_search_depth: str = "balanced"
     mpt_base_url: str = "http://127.0.0.1:8080"
     mpt_api_token: str = ""
-
-    # Object storage
-    storage_endpoint: str = "http://minio:9000"
-    storage_region: str = "auto"
-    storage_bucket: str = "vvf-outputs"
-    storage_access_key: str = "minioadmin"
-    storage_secret_key: str = "minioadmin"
-    storage_use_path_style: bool = True
-    storage_public_base_url: str = "http://localhost:9000/vvf-outputs"
 
     # LLM
     llm_provider: str = "openai"

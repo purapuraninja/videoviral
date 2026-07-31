@@ -65,15 +65,30 @@ services:
     depends_on:
       - api
 
+  # wigolo: local-first web search/fetch/extract (AGPL-3.0, never modified).
+  # `serve` exposes a REST API at /v1/{tool} plus /health. Binding off-loopback
+  # requires a bearer token, so WIGOLO_API_TOKEN must be set in .env.
+  # The :full tag preinstalls the browser engine (needed for JS-heavy result pages).
   wigolo:
-    image: ghcr.io/knockoutez/wigolo:latest
+    image: ghcr.io/knockoutez/wigolo:full
     restart: unless-stopped
     profiles: ["wigolo"]
+    command: ["serve", "--host", "0.0.0.0", "--port", "3333"]
     environment:
-      WIGOLO_TRANSPORT: http
-      WIGOLO_PORT: 3000
+      WIGOLO_API_TOKEN: ${WIGOLO_API_TOKEN:?set WIGOLO_API_TOKEN in .env}
+      # Keyless search/fetch/extract; an LLM is only needed for research/agent
+      # synthesis, which the discovery pipeline does not use.
+      WIGOLO_SEARCH: ${WIGOLO_SEARCH:-default}
+      WIGOLO_EAGER_WARMUP: "1"
     volumes:
-      - /opt/viral-video-factory/data/wigolo:/root/.wigolo
+      - /opt/viral-video-factory/data/wigolo:/data
+    healthcheck:
+      # /health is always open (no token) — safe for container healthchecks.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3333/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 180s
 
   discovery-worker:
     build:
@@ -84,7 +99,8 @@ services:
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
-      WIGOLO_BASE_URL: http://wigolo:3000
+      VVF_WIGOLO_BASE_URL: ${VVF_WIGOLO_BASE_URL:-http://wigolo:3333}
+      VVF_WIGOLO_API_TOKEN: ${WIGOLO_API_TOKEN:-}
       VVF_WIGOLO_USE_MOCK: ${VVF_WIGOLO_USE_MOCK:-1}
     depends_on:
       postgres:

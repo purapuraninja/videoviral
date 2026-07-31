@@ -2,8 +2,11 @@
 
 Reads jobs from ``vvf:discovery`` (enqueued by the API on
 POST /research-runs/{id}/start), runs the wigolo-backed pipeline, and marks the
-research run completed/failed. Uses ``MockWigoloClient`` when no live wigolo is
-reachable so dev works without the service.
+research run completed/failed.
+
+Set ``VVF_WIGOLO_USE_MOCK=0`` to use a live wigolo daemon. If the live daemon is
+unreachable at start-up the worker falls back to ``MockWigoloClient`` rather than
+failing every run, and says so loudly in the log.
 """
 
 from __future__ import annotations
@@ -23,16 +26,35 @@ from vvf_shared.logging import configure_logging, get_logger
 DISCOVERY_QUEUE = "vvf:discovery"
 
 
+def _use_mock() -> bool:
+    """Mock unless explicitly disabled (env wins over the settings default)."""
+    raw = os.getenv("VVF_WIGOLO_USE_MOCK")
+    if raw is not None:
+        return raw.strip().lower() not in ("0", "false", "no")
+    return get_settings().wigolo_use_mock
+
+
 def _make_wigolo_client():
-    """Return a real WigoloClient, or MockWigoloClient if configured/unreachable."""
-    use_mock = os.getenv("VVF_WIGOLO_USE_MOCK", "1") == "1"
-    if use_mock:
+    """Return a live WigoloClient, or MockWigoloClient if disabled/unreachable."""
+    log = get_logger()
+    if _use_mock():
         from vvf_wigolo import MockWigoloClient
 
+        log.info("wigolo: using MockWigoloClient (VVF_WIGOLO_USE_MOCK=1)")
         return MockWigoloClient()
-    from vvf_wigolo import WigoloClient
 
-    return WigoloClient()
+    from vvf_wigolo import MockWigoloClient, WigoloClient, WigoloError
+
+    client = WigoloClient()
+    try:
+        health = client.health()
+    except WigoloError as exc:
+        # A dead daemon must not silently produce mock candidates without a trace.
+        log.error(f"wigolo: live daemon unreachable ({exc}); falling back to mock")
+        client.close()
+        return MockWigoloClient()
+    log.info(f"wigolo: live daemon healthy: {health}")
+    return client
 
 
 def _get_redis():
