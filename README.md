@@ -16,11 +16,11 @@ Pipeline is **deployed and the rendering path works end-to-end with real videos*
 
 | Phase | Status | True state |
 | --- | --- | --- |
-| M0 — Foundation | ✅ done | Monorepo, Docker, contracts, DB/Alembic, seed, CI; 25 tests passing |
+| M0 — Foundation | ✅ done | Monorepo, Docker, contracts, DB/Alembic, seed, CI; 28 tests passing |
 | M1 — Discovery MVP | 🟡 partial | wigolo adapter + worker work; **runs on mock wigolo** (always Bali-gempa sample data). Real wigolo image **not enabled/verified** |
 | M2 — Approval & Queue | ✅ done | Approve/reject, render profiles, immutable render jobs, job-detail screen with live polled progress |
 | M3 — Local PC Rendering | ✅ done | `vvf-local-agent` + MoneyPrinterTurbo produce real `1080x1920` Indonesian MP4s (verified: ~23 MB, Edge TTS `id-ID-ArdiNeural`, Pexels footage, subtitles, ffmpeg) |
-| M4 — Output Management (**no VPS storage**) | 🟡 being rebuilt | Old VPS-upload code exists but is **being removed**. New direction: file stays on PC, dashboard previews it via **Tailscale** reverse-proxy stream. Tailscale wiring **not started** |
+| M4 — Output Management (**no VPS storage**) | 🟡 code done, deploy pending | VPS-upload path **removed** from agent + API. PC preview server (Tailscale-bound, Range-supported) + VPS `GET /render-jobs/{id}/preview` reverse-proxy + dashboard `<video>` player implemented and tested (28 tests). **Not yet deployed to VPS / restarted on PC** — see `docs/deployment-tailscale-preview.md` |
 | M5 — Reliability & Scale | ⬜ not started | Batch, retries, dead-letter, notifications, usage/cost metrics, multiple PCs |
 | **M6 — Publishing** | ⬜ not started | Publish finished video to YouTube/TikTok/Instagram via **free official APIs** (auto) with **manual fallback**; track post URLs |
 | **Real wigolo** | ⬜ not started | Keyword-accurate candidates. Enable: `VVF_WIGOLO_USE_MOCK=0` + `--profile wigolo` |
@@ -30,9 +30,10 @@ Pipeline is **deployed and the rendering path works end-to-end with real videos*
 - **API + docs:** https://api.purapuraninja.my.id (`/docs`)
 - VPS `153.76.249.141` — Docker Compose stack + nginx reverse proxy + Let's Encrypt TLS
 - Local PC — MoneyPrinterTurbo (Docker, CPU image) + `vvf-local-agent` (host Python 3.14)
+- **Tailscale tailnet (M4):** VPS `100.101.49.38`, PC `100.96.233.10` — connected ✅
 
 ### What currently works (verified)
-Login → create research run → discovery (mock) → 5 candidates → approve one → immutable render job queued → local agent claims → MoneyPrinterTurbo renders a real 9:16 Indonesian video → job `completed` with full progress timeline in the dashboard. The MP4 currently lives only on the PC (`MoneyPrinterTurbo/storage/tasks/{id}/final-1.mp4`); the dashboard's artifact link points to the PC's MPT (`http://127.0.0.1:8080/...`) so it is **not previewable from the dashboard yet** — the Tailscale proxy stream (M4) will fix this.
+Login → create research run → discovery (mock) → 5 candidates → approve one → immutable render job queued → local agent claims → MoneyPrinterTurbo renders a real 9:16 Indonesian video → job `completed` with full progress timeline in the dashboard. The MP4 lives only on the PC (`MoneyPrinterTurbo/storage/tasks/{id}/final-1.mp4`). M4 code is in place (metadata-only outputs + Tailscale preview proxy); pending VPS redeploy + PC agent restart to go live — checklist in `docs/deployment-tailscale-preview.md`.
 
 ## Roadmap to "final"
 
@@ -79,7 +80,7 @@ viral-video-factory/
 │   └── local-pc/                # MPT + agent install notes
 ├── docs/                        # architecture, api-contract, deployments, content-policy
 ├── scripts/                     # deploy.sh, e2e checks, mock_agent, create_job
-├── tests/                       # unit + integration (25 tests, all passing)
+├── tests/                       # unit + integration (28 tests, all passing)
 ├── docker-compose.dev.yml        # local dev stack
 ├── docker-compose.prod.yml       # production stack (VPS)
 └── README.md
@@ -90,12 +91,12 @@ viral-video-factory/
 
 ```bash
 cp .env.example .env
-docker compose -f docker-compose.dev.yml up --build      # postgres, redis, minio, wigolo(opt), api, dashboard, worker
+docker compose -f docker-compose.dev.yml up --build      # postgres, redis, wigolo(opt), api, dashboard, worker
 docker compose -f docker-compose.dev.yml exec api bash -lc "cd /app/packages/database && alembic upgrade head"
 docker compose -f docker-compose.dev.yml exec api python -m vvf_database.seed
 ```
 
-Default admin: `admin` / `VVF_ADMIN_PASSWORD` (default `changeme`). Tests: `pytest`.
+Default admin: `admin` / `VVF_ADMIN_PASSWORD` (default `changeme`). Tests: `pytest` (28 tests). No object storage needed — video never touches the VPS.
 
 ## Production deployment (VPS)
 
@@ -123,15 +124,21 @@ docker compose up -d --build api      # http://127.0.0.1:8080
 
 # 2. VVF local agent (host Python 3.11+)
 pip install -e packages/contracts packages/shared integrations/money-printer-turbo apps/local-render-agent
+
+# PC with Tailscale (this repo's reference deployment) — one line:
+powershell -File scripts/start-agent-pc.ps1
+
+# or manually elsewhere:
 VVF_API_URL=https://api.<your-domain> \
 VVF_AGENT_NAME=render-pc-01 \
 MPT_BASE_URL=http://127.0.0.1:8080 \
+VVF_PREVIEW_HOST=<tailscale-ip-of-this-pc> \
+VVF_PREVIEW_PORT=8090 \
+VVF_PREVIEW_ROOT=/abs/path/MoneyPrinterTurbo/storage/tasks \
 python -m vvf_local_agent.main
 ```
 
-The agent registers, heartbeats every 30 s, long-polls `claim-job`, and drives MPT per job. Idempotency keys prevent duplicate renders on retry. The rendered file stays on the PC; the agent reports metadata to the VPS and (M4/M6) serves preview over Tailscale + publishes to platforms.
-
-For preview, join the PC and VPS to a Tailscale tailnet and bind the PC's preview server to the Tailscale interface only (never a public interface).
+The agent registers (advertising its Tailscale `preview_base_url`), heartbeats every 30 s, long-polls `claim-job`, and drives MPT per job. Idempotency keys prevent duplicate renders on retry. The rendered file stays on the PC; the agent reports metadata to the VPS, serves preview over Tailscale, and (M6) publishes to platforms. Verify preview reachability from the VPS before relying on it; full checklist: [`docs/deployment-tailscale-preview.md`](./docs/deployment-tailscale-preview.md).
 
 ## Key facts / gotchas (learned during deployment)
 
@@ -145,7 +152,7 @@ For preview, join the PC and VPS to a Tailscale tailnet and bind the PC's previe
 
 See the **Roadmap to "final"** above for the ordered plan. Summary of what's left:
 
-- [ ] **M4 — Preview over Tailscale**: remove VPS-upload code; PC preview server + VPS reverse-proxy stream + dashboard `<video>` player (no VPS storage).
+- [ ] **M4 — Preview over Tailscale**: deploy pending — VPS `git pull` + `deploy.sh` + `alembic upgrade head`, PC restart agent via `scripts/start-agent-pc.ps1` (checklist: `docs/deployment-tailscale-preview.md`).
 - [ ] **M6 — Publishing**: publish to YouTube/TikTok/Instagram via free official APIs (auto) with manual fallback; record post URLs.
 - [ ] **Real wigolo**: keyword-accurate candidates (mock off + `--profile wigolo`).
 - [ ] **M5 — Reliability**: batch, retries, dead-letter, notifications, usage/cost metrics, multiple render PCs.
