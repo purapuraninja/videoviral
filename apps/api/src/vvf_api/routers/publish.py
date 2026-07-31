@@ -208,9 +208,14 @@ def retry_publish_target(
 def _sync_job_status(db, job_id: str) -> None:
     """Reflect target states onto the render job.
 
-    published  — every target reached a terminal-good state
-    publish_failed — nothing is pending and at least one target failed
-    publishing — work still outstanding
+    ``published``      every target reached a terminal-good state
+    ``publishing``     work is still outstanding — either the agent is running or
+                       a target is ``manual_required`` and awaits the admin
+    ``publish_failed`` nothing succeeded, nothing is outstanding, something failed
+
+    ``manual_required`` deliberately counts as outstanding rather than failed: it
+    is a request for admin action, and the job resolves once the admin records
+    the post URL (or retries automatically).
     """
     job = db.get(RenderJob, job_id)
     if job is None:
@@ -223,12 +228,13 @@ def _sync_job_status(db, job_id: str) -> None:
     ]
     if not states:
         return
-    if any(s in ("pending", "publishing") for s in states):
+    outstanding = {"pending", "publishing", "manual_required"}
+    if any(s in outstanding for s in states):
         job.status = "publishing"
     elif all(s in ("published", "skipped") for s in states):
         job.status = "published"
     elif any(s == "published" for s in states):
-        # Partial success: some platforms live, others need attention.
+        # Partial success: some platforms live, others failed terminally.
         job.status = "published"
     else:
         job.status = "publish_failed"

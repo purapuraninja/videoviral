@@ -128,14 +128,17 @@ def _sync(statuses: list[str]) -> str:
         # Work still outstanding keeps the job in publishing.
         (["published", "pending"], "publishing"),
         (["publishing", "failed"], "publishing"),
-        # Partial success still counts as published; the failed target is visible
-        # on its own row so the admin can retry or go manual.
+        # manual_required is a request for admin action, not a failure — the job
+        # stays in publishing until the admin records a URL or retries.
+        (["manual_required"], "publishing"),
+        (["manual_required", "failed"], "publishing"),
+        (["published", "manual_required"], "publishing"),
+        # Partial success with only terminal failures alongside still counts as
+        # published; the failed target is visible on its own row.
         (["published", "failed"], "published"),
-        (["published", "manual_required"], "published"),
-        # Nothing succeeded and nothing is pending -> the job failed to publish.
+        # Nothing succeeded and nothing is outstanding -> the job failed.
         (["failed", "failed"], "publish_failed"),
-        (["manual_required", "failed"], "publish_failed"),
-        (["manual_required"], "publish_failed"),
+        (["failed", "skipped"], "publish_failed"),
     ],
 )
 def test_sync_job_status_decision_table(statuses, expected):
