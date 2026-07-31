@@ -15,8 +15,8 @@ $PSQL "select version_num from alembic_version;"
 echo "=== publish_targets columns ==="
 $PSQL "select string_agg(column_name, ', ' order by ordinal_position) from information_schema.columns where table_name='publish_targets';"
 
-echo "=== render_job status constraint includes publishing states ==="
-$PSQL "select case when pg_get_constraintdef(oid) like '%publish_failed%' then 'yes' else 'no' end from pg_constraint where conname='render_job_status_valid';"
+echo "=== render_job status constraint (must include publishing states) ==="
+$PSQL "select pg_get_constraintdef(oid) from pg_constraint where conname like 'render_job_status%';"
 
 echo "=== routes ==="
 curl -s http://127.0.0.1:8000/openapi.json > /tmp/m6_openapi.json
