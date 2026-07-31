@@ -63,7 +63,12 @@ def test_mpt_params_from_payload_portrait():
     assert params.video_aspect.value == "9:16"
     assert params.video_language == "id-ID"
     assert params.video_subject == "Judul"
-    assert "tone: informative-fast" in params.video_script_prompt
+    # Creative direction + language + duration are folded into the LLM prompt.
+    assert "Cek ini!" in params.video_script_prompt
+    assert "informative-fast" in params.video_script_prompt
+    assert "45" in params.video_script_prompt
+    # custom_system_prompt must stay empty so MPT uses its own tuned system prompt.
+    assert params.custom_system_prompt == ""
     assert params.video_script == "naskah"
 
 

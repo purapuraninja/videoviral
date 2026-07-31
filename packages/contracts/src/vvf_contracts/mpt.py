@@ -67,8 +67,10 @@ class MPTVideoParams(BaseModel):
     def from_payload(cls, payload: RenderJobPayload, script: str = "") -> "MPTVideoParams":
         """Map an immutable VVF render job payload into MPT VideoParams.
 
-        The hook/tone are folded into ``video_script_prompt`` so MPT's LLM
-        receives the creative direction alongside the candidate title.
+        The hook/tone/facts are folded into ``video_script_prompt`` so MPT's LLM
+        receives the creative direction plus grounded facts. ``custom_system_prompt``
+        is left empty so MPT uses its own tuned system prompt (passing an
+        unrelated string there makes the LLM return empty content).
         """
         v = payload.video
         creative = payload.creative
@@ -77,7 +79,17 @@ class MPTVideoParams(BaseModel):
             if v.aspect_ratio.value == "9:16"
             else MPTVideoAspect.LANDSCAPE
         )
-        prompt_bits = [b for b in (creative.hook, f"tone: {creative.tone}") if b]
+        prompt_bits = [
+            b
+            for b in (
+                creative.hook,
+                f"Bahasa: {v.language.value}.",
+                f"Gaya: {creative.tone}.",
+                f"Durasi target: {v.duration_seconds} detik.",
+                ("Fakta: " + " ".join(payload.candidate.facts)) if payload.candidate.facts else "",
+            )
+            if b
+        ]
         return cls(
             video_subject=payload.candidate.title,
             video_script=script,
@@ -86,9 +98,17 @@ class MPTVideoParams(BaseModel):
             voice_name=creative.voice,
             video_source=creative.video_source,
             subtitle_position=_subtitle_position(creative.subtitle_style),
-            video_script_prompt=" | ".join(prompt_bits),
-            custom_system_prompt=creative.music_profile,
+            video_script_prompt=" ".join(prompt_bits),
+            bgm_type=_bgm_type(creative.music_profile),
         )
+
+
+def _bgm_type(music_profile: str) -> str:
+    """Map a VVF music profile to MPT's bgm_type (random | none)."""
+    p = (music_profile or "").lower()
+    if p in ("", "none", "off", "silent", "no-music"):
+        return "none"
+    return "random"
 
 
 def _subtitle_position(style: str) -> str:
